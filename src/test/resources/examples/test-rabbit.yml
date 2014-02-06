@@ -1,0 +1,17 @@
+username: guest
+password: guest
+host: localhost
+port: 5672
+vHost: /
+connectionTimeout: 1000
+
+queues:
+-
+  alias: testQueue
+  queueName: test_q
+
+destinations:
+-
+  alias: testDestination
+  exchange: test_x
+  routingKey: test_r
