@@ -13,7 +13,6 @@ public class Rabbit {
 
     private final RabbitConfig rabbitConfig;
     private final Connection connection;
-    private final Channel channel;
 
     public Rabbit(RabbitConfig config) throws IOException {
         this.rabbitConfig = config;
@@ -25,7 +24,6 @@ public class Rabbit {
         connectionFactory.setPassword(config.password);
         connectionFactory.setConnectionTimeout(config.connectionTimeout);
         this.connection = connectionFactory.newConnection();
-        this.channel = connection.createChannel();
     }
 
     public Consumer consumer(String alias) {
@@ -39,7 +37,7 @@ public class Rabbit {
         if (queue == null) {
             throw new IllegalArgumentException("No queue configured with alias: " + alias);
         }
-        return new Consumer(channel, queue);
+        return new Consumer(connection, queue);
     }
 
     public Publisher publisher(String alias) {
@@ -53,14 +51,11 @@ public class Rabbit {
         if (destinationConfig == null) {
             throw new IllegalArgumentException("No destination configured with alias: " + alias);
         }
-        return new Publisher(channel, destinationConfig.exchange, destinationConfig.routingKey);
+        return new Publisher(connection, destinationConfig.exchange, destinationConfig.routingKey);
     }
 
     public void tearDown() {
         try {
-            if (channel.isOpen()) {
-                channel.close();
-            }
             if (connection.isOpen()) {
                 connection.close();
             }

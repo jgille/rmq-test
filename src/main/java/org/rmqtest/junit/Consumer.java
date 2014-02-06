@@ -1,21 +1,18 @@
 package org.rmqtest.junit;
 
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.GetResponse;
+import com.rabbitmq.client.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
-import static com.jayway.awaitility.Awaitility.await;
 
 public class Consumer {
 
-    private final Channel channel;
+    private final Connection connection;
     private final String queue;
 
     private int numExpectedMessages = 1;
@@ -24,19 +21,27 @@ public class Consumer {
 
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
-    public Consumer(Channel channel, String queue) {
-        this.channel = channel;
+    public Consumer(Connection connection, String queue) {
+        this.connection = connection;
         this.queue = queue;
     }
 
     public Consumer drain() throws IOException {
         logger.info("Draining queue: {}", queue);
-        while (true) {
-            GetResponse getResponse = channel.basicGet(queue, true);
-            if (getResponse == null) {
-                return this;
+        Channel channel = null;
+        try {
+            channel = connection.createChannel();
+            while (true) {
+                GetResponse getResponse = channel.basicGet(queue, true);
+                if (getResponse == null) {
+                    return this;
+                }
+                logger.info("Message drained");
             }
-            logger.info("Message drained");
+        } finally {
+            if (channel != null && channel.isOpen()) {
+                channel.close();
+            }
         }
     }
 
@@ -53,22 +58,37 @@ public class Consumer {
 
     public List<byte[]> collect(String errorMessage) throws IOException {
         logger.info("Attempting to consume {} messages from {}", numExpectedMessages, queue);
+        final CountDownLatch latch = new CountDownLatch(numExpectedMessages);
         final List<byte[]> messages = new ArrayList<>(numExpectedMessages);
-        await(errorMessage + ". Expected " + numExpectedMessages + " messages.")
-                .atMost(timeout, timeUnit)
-                .until(new Callable<Boolean>() {
-                    @Override
-                    public Boolean call() throws IOException {
-                        GetResponse getResponse = channel.basicGet(queue, true);
-                        if (getResponse == null) {
-                            return false;
-                        }
-                        byte[] body = getResponse.getBody();
-                        messages.add(body);
-                        logger.info("Message consumed. Total number of consumed messages: {}.", messages.size());
-                        return messages.size() == numExpectedMessages;
-                    }
-                });
+
+        Channel channel = null;
+        try {
+            channel = connection.createChannel();
+            channel.basicConsume(queue, new DefaultConsumer(channel) {
+                @Override
+                public void handleDelivery(String consumerTag,
+                                           Envelope envelope,
+                                           AMQP.BasicProperties properties,
+                                           byte[] body) throws IOException {
+                    messages.add(body);
+                    latch.countDown();
+                }
+            });
+            try {
+                latch.await(timeout, timeUnit);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        } finally {
+            if (channel != null && channel.isOpen()) {
+                channel.close();
+            }
+        }
+
+        if (messages.size() < numExpectedMessages) {
+            throw new AssertionError(errorMessage + " Expected " + numExpectedMessages + " messages but " +
+                    "only got " + messages.size());
+        }
         return messages;
     }
 }
