@@ -77,6 +77,7 @@ public class Consumer {
             try {
                 latch.await(timeout, timeUnit);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
         } finally {
